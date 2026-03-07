@@ -4,7 +4,7 @@ from server.database import get_db
 from server import models, schemas
 from server.dependencies import get_current_user_from_cookie
 import openai
-from server.config import OPENAI_API_KEY
+from server.config import OPENAI_API_KEY, OPENAI_MODEL
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/threads", tags=["threads"])
@@ -54,17 +54,18 @@ def chat(thread_id: int, request: ChatRequest, db: Session = Depends(get_db), cu
     try:
         # Use a dummy response if OPENAI_API_KEY is fake or not set properly for testing
         if OPENAI_API_KEY in ["test-key-or-mock", "your_openai_api_key_here"] or OPENAI_API_KEY.startswith("test-"):
-             # Dummy AI test response including some Markdown formatting to test frontend
-             ai_content = f"Hello! This is a **mock response** from Nyx (GPT-5 Nano simulator).\n\nSince the API key is `{OPENAI_API_KEY}`, I am generating this fake Markdown output to test the UI.\n\n```python\nprint('Testing fake responses!')\n```\n\nYou asked: {request.message}"
+            prior_count = len(history) - 1  # exclude the just-added user message
+            context_summary = f" ({prior_count} previous message(s) in context)" if prior_count > 0 else " (no prior context)"
+            ai_content = f"Hello! This is a **mock response** from Nyx (model: `{OPENAI_MODEL}`).{context_summary}\n\nSince the API key is `{OPENAI_API_KEY}`, I am generating this fake Markdown output to test the UI.\n\n```python\nprint('Testing fake responses!')\n```\n\nYou asked: {request.message}"
         else:
             client = openai.OpenAI(api_key=OPENAI_API_KEY)
             response = client.chat.completions.create(
-                model="gpt5-nano",
+                model=OPENAI_MODEL,
                 messages=messages_payload
             )
             ai_content = response.choices[0].message.content
     except Exception as e:
-        ai_content = f"Error or Stub Response (using gpt5-nano): {str(e)}\n\n(Because API failed)"
+        ai_content = f"Error calling OpenAI API (model: {OPENAI_MODEL}): {str(e)}\n\n(Because API failed)"
 
     ai_msg = models.Message(thread_id=thread_id, role="assistant", content=ai_content)
     db.add(ai_msg)
