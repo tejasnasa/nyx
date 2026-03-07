@@ -1,0 +1,24 @@
+# Roots
+/node_modules
+/server/venv
+/__pycache__
+*.pyc
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Next.js
+.next/
+out/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
