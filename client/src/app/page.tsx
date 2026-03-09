@@ -21,6 +21,7 @@ export default function Home() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     checkAuth();
@@ -37,6 +38,18 @@ export default function Home() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
+
+  useEffect(() => {
+    autoResizeTextarea();
+  }, [inputText]);
+
+  const autoResizeTextarea = () => {
+    const el = textareaRef.current;
+    if (el) {
+      el.style.height = 'auto';
+      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    }
+  };
 
   const checkAuth = async () => {
     try {
@@ -95,6 +108,23 @@ export default function Home() {
     }
   };
 
+  const deleteThread = async (threadId: number) => {
+    try {
+      const res = await fetch(`${BASE_URL}/threads/${threadId}`, { method: 'DELETE', ...FETCH_OPTS });
+      if (res.ok || res.status === 204) {
+        setThreads(prev => {
+          const remaining = prev.filter(t => t.id !== threadId);
+          if (activeThreadId === threadId) {
+            setActiveThreadId(remaining.length > 0 ? remaining[0].id : null);
+          }
+          return remaining;
+        });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleLogout = async () => {
     try {
       await fetch(`${BASE_URL}/logout`, { method: 'POST', ...FETCH_OPTS });
@@ -138,8 +168,8 @@ export default function Home() {
         const data = await res.json();
         setMessages(prev => [...prev, { id: data.message_id, role: 'assistant', content: data.reply }]);
         
-        if (userMessageCount === 0) {
-            loadThreads();
+        if (userMessageCount === 0 && data.thread_title) {
+          setThreads(prev => prev.map(t => t.id === activeThreadId ? { ...t, title: data.thread_title } : t));
         }
       } else {
         const err = await res.json();
@@ -171,7 +201,8 @@ export default function Home() {
         threads={threads} 
         activeThreadId={activeThreadId} 
         onSelectThread={setActiveThreadId} 
-        onCreateThread={createNewThread} 
+        onCreateThread={createNewThread}
+        onDeleteThread={deleteThread}
         onLogout={handleLogout} 
       />
 
@@ -202,10 +233,11 @@ export default function Home() {
         <div className="input-area">
           <form className="input-form" onSubmit={sendMessage}>
             <textarea
+              ref={textareaRef}
               className="chat-input"
               placeholder={activeThreadId ? "Message Nyx..." : "Create a thread first..."}
               value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
+              onChange={(e) => { setInputText(e.target.value); autoResizeTextarea(); }}
               onKeyDown={handleKeyDown}
               disabled={!activeThreadId || isLoading}
               rows={1}

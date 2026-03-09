@@ -223,11 +223,34 @@ input, button {
   overflow: hidden;
   text-overflow: ellipsis;
   transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .thread-item:hover, .thread-item.active {
   background: rgba(255, 255, 255, 0.05);
   color: var(--text-primary);
+}
+
+.delete-thread-btn {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0.2rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s, background 0.2s;
+  line-height: 1;
+}
+
+.delete-thread-btn:hover {
+  color: var(--error-color);
+  background: rgba(255, 123, 114, 0.1);
 }
 
 .user-profile {

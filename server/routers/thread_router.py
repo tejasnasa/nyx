@@ -1,5 +1,3 @@
-from urllib import response
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from server.database import get_db
@@ -40,11 +38,14 @@ def chat(thread_id: int, request: ChatRequest, db: Session = Depends(get_db), cu
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
     
+    if not request.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
     user_messages_count = db.query(models.Message).filter(models.Message.thread_id == thread_id, models.Message.role == "user").count()
     if user_messages_count >= 10:
         raise HTTPException(status_code=400, detail="Thread has reached the maximum of 10 replies.")
     
-    user_msg = models.Message(thread_id=thread_id, role="user", content=request.message)
+    user_msg = models.Message(thread_id=thread_id, role="user", content=request.message.strip())
     db.add(user_msg)
     db.commit()
 
@@ -62,14 +63,11 @@ def chat(thread_id: int, request: ChatRequest, db: Session = Depends(get_db), cu
         else:
             client = openai.OpenAI(api_key=OPENAI_API_KEY)
             response = client.responses.create(
-                model="gpt-5-nano",
+                model=OPENAI_MODEL,
                 input=messages_payload,
                 max_output_tokens=500,
                 reasoning={"effort": "low"}
             )
-            print("OpenAI API response:", response.usage)
-
-            print(response.output_text)
             ai_content = response.output_text
     except Exception as e:
         ai_content = f"Error calling OpenAI API (model: {OPENAI_MODEL}): {str(e)}\n\n(Because API failed)"
@@ -80,7 +78,18 @@ def chat(thread_id: int, request: ChatRequest, db: Session = Depends(get_db), cu
     db.refresh(ai_msg)
 
     if user_messages_count == 0:
-        thread.title = request.message[:30] + "..." if len(request.message) > 30 else request.message
+        title_text = request.message.strip()
+        thread.title = title_text[:30] + "..." if len(title_text) > 30 else title_text
         db.commit()
 
-    return {"reply": ai_content, "message_id": ai_msg.id}
+    return {"reply": ai_content, "message_id": ai_msg.id, "thread_title": thread.title}
+
+@router.delete("/{thread_id}", status_code=204)
+def delete_thread(thread_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user_from_cookie)):
+    thread = db.query(models.Thread).filter(models.Thread.id == thread_id, models.Thread.owner_id == current_user.id).first()
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    db.query(models.Message).filter(models.Message.thread_id == thread_id).delete()
+    db.delete(thread)
+    db.commit()
