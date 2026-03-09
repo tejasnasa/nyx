@@ -50,9 +50,7 @@ def chat(thread_id: int, request: ChatRequest, db: Session = Depends(get_db), cu
     db.commit()
 
     history = db.query(models.Message).filter(models.Message.thread_id == thread_id).order_by(models.Message.created_at.asc()).all()
-    messages_payload = [{"role": "system", "content": "You are Nyx, a helpful AI assistant. Format replies using markdown."}]
-    for msg in history:
-        messages_payload.append({"role": msg.role, "content": msg.content})
+    messages_input = [{"role": msg.role, "content": msg.content} for msg in history]
 
     try:
         # Use a dummy response if OPENAI_API_KEY is fake or not set properly for testing
@@ -64,9 +62,9 @@ def chat(thread_id: int, request: ChatRequest, db: Session = Depends(get_db), cu
             client = openai.OpenAI(api_key=OPENAI_API_KEY)
             response = client.responses.create(
                 model=OPENAI_MODEL,
-                input=messages_payload,
+                instructions="You are Nyx, a helpful AI assistant. Format replies using markdown.",
+                input=messages_input,
                 max_output_tokens=500,
-                reasoning={"effort": "low"}
             )
             ai_content = response.output_text
     except Exception as e:
