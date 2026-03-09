@@ -9,8 +9,14 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/threads", tags=["threads"])
 
+def _is_mock_api_key(key: str) -> bool:
+    return key in ["test-key-or-mock", "your_openai_api_key_here"] or key.startswith("test-")
+
 class ChatRequest(BaseModel):
     message: str
+
+class ImageRequest(BaseModel):
+    prompt: str
 
 @router.get("", response_model=list[schemas.ThreadResponse])
 def get_threads(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user_from_cookie)):
@@ -54,7 +60,7 @@ def chat(thread_id: int, request: ChatRequest, db: Session = Depends(get_db), cu
 
     try:
         # Use a dummy response if OPENAI_API_KEY is fake or not set properly for testing
-        if OPENAI_API_KEY in ["test-key-or-mock", "your_openai_api_key_here"] or OPENAI_API_KEY.startswith("test-"):
+        if _is_mock_api_key(OPENAI_API_KEY):
             prior_count = len(history) - 1  # exclude the just-added user message
             context_summary = f" ({prior_count} previous message(s) in context)" if prior_count > 0 else " (no prior context)"
             ai_content = f"Hello! This is a **mock response** from Nyx (model: `{OPENAI_MODEL}`).{context_summary}\n\nSince the API key is `{OPENAI_API_KEY}`, I am generating this fake Markdown output to test the UI.\n\n```python\nprint('Testing fake responses!')\n```\n\nYou asked: {request.message}"
@@ -91,3 +97,50 @@ def delete_thread(thread_id: int, db: Session = Depends(get_db), current_user: m
     db.query(models.Message).filter(models.Message.thread_id == thread_id).delete()
     db.delete(thread)
     db.commit()
+
+@router.post("/{thread_id}/generate-image")
+def generate_image(thread_id: int, request: ImageRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user_from_cookie)):
+    thread = db.query(models.Thread).filter(models.Thread.id == thread_id, models.Thread.owner_id == current_user.id).first()
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    if not request.prompt.strip():
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
+
+    user_messages_count = db.query(models.Message).filter(models.Message.thread_id == thread_id, models.Message.role == "user").count()
+    if user_messages_count >= 10:
+        raise HTTPException(status_code=400, detail="Thread has reached the maximum of 10 replies.")
+
+    user_msg = models.Message(thread_id=thread_id, role="user", content=f"🎨 {request.prompt.strip()}")
+    db.add(user_msg)
+    db.commit()
+
+    try:
+        if _is_mock_api_key(OPENAI_API_KEY):
+            image_url = f"https://placehold.co/1024x1024/161b22/58a6ff?text=Mock+Image"
+        else:
+            client = openai.OpenAI(api_key=OPENAI_API_KEY)
+            img_response = client.images.generate(
+                model="dall-e-3",
+                prompt=request.prompt.strip(),
+                n=1,
+                size="1024x1024",
+            )
+            image_url = img_response.data[0].url
+    except Exception as e:
+        db.query(models.Message).filter(models.Message.id == user_msg.id).delete()
+        db.commit()
+        raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
+
+    ai_content = f"![Generated image]({image_url})"
+    ai_msg = models.Message(thread_id=thread_id, role="assistant", content=ai_content)
+    db.add(ai_msg)
+    db.commit()
+    db.refresh(ai_msg)
+
+    if user_messages_count == 0:
+        title_text = request.prompt.strip()
+        thread.title = title_text[:30] + "..." if len(title_text) > 30 else title_text
+        db.commit()
+
+    return {"image_url": image_url, "message_id": ai_msg.id, "thread_title": thread.title}

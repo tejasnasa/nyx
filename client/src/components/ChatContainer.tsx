@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import { FileText, Bot, AlertCircle } from 'lucide-react';
 import { Message } from '@/lib/api';
 import React from 'react';
+import type { Components } from 'react-markdown';
 
 type ChatContainerProps = {
   activeThreadId: number | null;
@@ -36,6 +37,16 @@ export default function ChatContainer({ activeThreadId, messages, isLoading, scr
 
   const userCount = messages.filter(m => m.role === 'user').length;
 
+  const markdownComponents: Components = {
+    img: ({ src, alt }) => (
+      <img
+        src={src}
+        alt={alt || 'Generated image'}
+        className="generated-image"
+      />
+    ),
+  };
+
   return (
     <div className="chat-container" ref={scrollRef}>
       <div style={{ display: 'flex', justifyContent: 'center' }}>
@@ -66,7 +77,7 @@ export default function ChatContainer({ activeThreadId, messages, isLoading, scr
                 </div>
               )}
               {msg.role === 'assistant' ? (
-                <ReactMarkdown>{msg.content}</ReactMarkdown>
+                <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
               ) : (
                 msg.content
               )}
