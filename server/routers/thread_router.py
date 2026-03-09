@@ -1,3 +1,5 @@
+from urllib import response
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from server.database import get_db
@@ -59,11 +61,16 @@ def chat(thread_id: int, request: ChatRequest, db: Session = Depends(get_db), cu
             ai_content = f"Hello! This is a **mock response** from Nyx (model: `{OPENAI_MODEL}`).{context_summary}\n\nSince the API key is `{OPENAI_API_KEY}`, I am generating this fake Markdown output to test the UI.\n\n```python\nprint('Testing fake responses!')\n```\n\nYou asked: {request.message}"
         else:
             client = openai.OpenAI(api_key=OPENAI_API_KEY)
-            response = client.chat.completions.create(
-                model=OPENAI_MODEL,
-                messages=messages_payload
+            response = client.responses.create(
+                model="gpt-5-nano",
+                input=messages_payload,
+                max_output_tokens=500,
+                reasoning={"effort": "low"}
             )
-            ai_content = response.choices[0].message.content
+            print("OpenAI API response:", response.usage)
+
+            print(response.output_text)
+            ai_content = response.output_text
     except Exception as e:
         ai_content = f"Error calling OpenAI API (model: {OPENAI_MODEL}): {str(e)}\n\n(Because API failed)"
 
