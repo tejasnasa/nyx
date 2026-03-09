@@ -1,5 +1,3 @@
-from urllib import response
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from server.database import get_db
@@ -11,8 +9,14 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/threads", tags=["threads"])
 
+def _is_mock_api_key(key: str) -> bool:
+    return key in ["test-key-or-mock", "your_openai_api_key_here"] or key.startswith("test-")
+
 class ChatRequest(BaseModel):
     message: str
+
+class ImageRequest(BaseModel):
+    prompt: str
 
 @router.get("", response_model=list[schemas.ThreadResponse])
 def get_threads(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user_from_cookie)):
@@ -40,36 +44,34 @@ def chat(thread_id: int, request: ChatRequest, db: Session = Depends(get_db), cu
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
     
+    if not request.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
     user_messages_count = db.query(models.Message).filter(models.Message.thread_id == thread_id, models.Message.role == "user").count()
     if user_messages_count >= 10:
         raise HTTPException(status_code=400, detail="Thread has reached the maximum of 10 replies.")
     
-    user_msg = models.Message(thread_id=thread_id, role="user", content=request.message)
+    user_msg = models.Message(thread_id=thread_id, role="user", content=request.message.strip())
     db.add(user_msg)
     db.commit()
 
     history = db.query(models.Message).filter(models.Message.thread_id == thread_id).order_by(models.Message.created_at.asc()).all()
-    messages_payload = [{"role": "system", "content": "You are Nyx, a helpful AI assistant. Format replies using markdown."}]
-    for msg in history:
-        messages_payload.append({"role": msg.role, "content": msg.content})
+    messages_input = [{"role": msg.role, "content": msg.content} for msg in history]
 
     try:
         # Use a dummy response if OPENAI_API_KEY is fake or not set properly for testing
-        if OPENAI_API_KEY in ["test-key-or-mock", "your_openai_api_key_here"] or OPENAI_API_KEY.startswith("test-"):
+        if _is_mock_api_key(OPENAI_API_KEY):
             prior_count = len(history) - 1  # exclude the just-added user message
             context_summary = f" ({prior_count} previous message(s) in context)" if prior_count > 0 else " (no prior context)"
             ai_content = f"Hello! This is a **mock response** from Nyx (model: `{OPENAI_MODEL}`).{context_summary}\n\nSince the API key is `{OPENAI_API_KEY}`, I am generating this fake Markdown output to test the UI.\n\n```python\nprint('Testing fake responses!')\n```\n\nYou asked: {request.message}"
         else:
             client = openai.OpenAI(api_key=OPENAI_API_KEY)
             response = client.responses.create(
-                model="gpt-5-nano",
-                input=messages_payload,
+                model=OPENAI_MODEL,
+                instructions="You are Nyx, a helpful AI assistant. Format replies using markdown.",
+                input=messages_input,
                 max_output_tokens=500,
-                reasoning={"effort": "low"}
             )
-            print("OpenAI API response:", response.usage)
-
-            print(response.output_text)
             ai_content = response.output_text
     except Exception as e:
         ai_content = f"Error calling OpenAI API (model: {OPENAI_MODEL}): {str(e)}\n\n(Because API failed)"
@@ -80,7 +82,65 @@ def chat(thread_id: int, request: ChatRequest, db: Session = Depends(get_db), cu
     db.refresh(ai_msg)
 
     if user_messages_count == 0:
-        thread.title = request.message[:30] + "..." if len(request.message) > 30 else request.message
+        title_text = request.message.strip()
+        thread.title = title_text[:30] + "..." if len(title_text) > 30 else title_text
         db.commit()
 
-    return {"reply": ai_content, "message_id": ai_msg.id}
+    return {"reply": ai_content, "message_id": ai_msg.id, "thread_title": thread.title}
+
+@router.delete("/{thread_id}", status_code=204)
+def delete_thread(thread_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user_from_cookie)):
+    thread = db.query(models.Thread).filter(models.Thread.id == thread_id, models.Thread.owner_id == current_user.id).first()
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    db.query(models.Message).filter(models.Message.thread_id == thread_id).delete()
+    db.delete(thread)
+    db.commit()
+
+@router.post("/{thread_id}/generate-image")
+def generate_image(thread_id: int, request: ImageRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user_from_cookie)):
+    thread = db.query(models.Thread).filter(models.Thread.id == thread_id, models.Thread.owner_id == current_user.id).first()
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    if not request.prompt.strip():
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
+
+    user_messages_count = db.query(models.Message).filter(models.Message.thread_id == thread_id, models.Message.role == "user").count()
+    if user_messages_count >= 10:
+        raise HTTPException(status_code=400, detail="Thread has reached the maximum of 10 replies.")
+
+    user_msg = models.Message(thread_id=thread_id, role="user", content=f"🎨 {request.prompt.strip()}")
+    db.add(user_msg)
+    db.commit()
+
+    try:
+        if _is_mock_api_key(OPENAI_API_KEY):
+            image_url = f"https://placehold.co/1024x1024/161b22/58a6ff?text=Mock+Image"
+        else:
+            client = openai.OpenAI(api_key=OPENAI_API_KEY)
+            img_response = client.images.generate(
+                model="dall-e-3",
+                prompt=request.prompt.strip(),
+                n=1,
+                size="1024x1024",
+            )
+            image_url = img_response.data[0].url
+    except Exception as e:
+        db.query(models.Message).filter(models.Message.id == user_msg.id).delete()
+        db.commit()
+        raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
+
+    ai_content = f"![Generated image]({image_url})"
+    ai_msg = models.Message(thread_id=thread_id, role="assistant", content=ai_content)
+    db.add(ai_msg)
+    db.commit()
+    db.refresh(ai_msg)
+
+    if user_messages_count == 0:
+        title_text = request.prompt.strip()
+        thread.title = title_text[:30] + "..." if len(title_text) > 30 else title_text
+        db.commit()
+
+    return {"image_url": image_url, "message_id": ai_msg.id, "thread_title": thread.title}

@@ -223,11 +223,34 @@ input, button {
   overflow: hidden;
   text-overflow: ellipsis;
   transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .thread-item:hover, .thread-item.active {
   background: rgba(255, 255, 255, 0.05);
   color: var(--text-primary);
+}
+
+.delete-thread-btn {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0.2rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s, background 0.2s;
+  line-height: 1;
+}
+
+.delete-thread-btn:hover {
+  color: var(--error-color);
+  background: rgba(255, 123, 114, 0.1);
 }
 
 .user-profile {
@@ -392,12 +415,51 @@ input, button {
   margin: 0 auto;
 }
 
+.input-actions {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.image-mode-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid var(--surface-border);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s, border-color 0.2s;
+}
+
+.image-mode-btn:hover {
+  color: var(--accent-color);
+  border-color: var(--accent-color);
+}
+
+.image-mode-btn.active {
+  background: rgba(88, 166, 255, 0.15);
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
+.image-mode-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .chat-input {
   width: 100%;
   background: rgba(22, 27, 34, 0.8);
   border: 1px solid var(--surface-border);
   border-radius: 12px;
-  padding: 1rem 3rem 1rem 1.25rem;
+  padding: 1rem 5rem 1rem 1.25rem;
   color: var(--text-primary);
   font-size: 1rem;
   resize: none;
@@ -414,9 +476,6 @@ input, button {
 }
 
 .send-btn {
-  position: absolute;
-  right: 0.75rem;
-  bottom: 0.75rem;
   width: 32px;
   height: 32px;
   border-radius: 8px;
@@ -439,4 +498,11 @@ input, button {
   color: var(--text-secondary);
   cursor: not-allowed;
   transform: none;
+}
+
+.generated-image {
+  max-width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--surface-border);
+  display: block;
 }

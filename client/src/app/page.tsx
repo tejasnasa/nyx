@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertCircle, Send } from 'lucide-react';
+import { AlertCircle, Send, Image as ImageIcon } from 'lucide-react';
 import { BASE_URL, FETCH_OPTS, User, Thread, Message } from '@/lib/api';
 import Sidebar from '@/components/Sidebar';
 import ChatContainer from '@/components/ChatContainer';
@@ -16,11 +16,13 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isImageMode, setIsImageMode] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
   const [errorToast, setErrorToast] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     checkAuth();
@@ -37,6 +39,18 @@ export default function Home() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
+
+  useEffect(() => {
+    autoResizeTextarea();
+  }, [inputText]);
+
+  const autoResizeTextarea = () => {
+    const el = textareaRef.current;
+    if (el) {
+      el.style.height = 'auto';
+      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    }
+  };
 
   const checkAuth = async () => {
     try {
@@ -95,6 +109,23 @@ export default function Home() {
     }
   };
 
+  const deleteThread = async (threadId: number) => {
+    try {
+      const res = await fetch(`${BASE_URL}/threads/${threadId}`, { method: 'DELETE', ...FETCH_OPTS });
+      if (res.ok || res.status === 204) {
+        setThreads(prev => {
+          const remaining = prev.filter(t => t.id !== threadId);
+          if (activeThreadId === threadId) {
+            setActiveThreadId(remaining.length > 0 ? remaining[0].id : null);
+          }
+          return remaining;
+        });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleLogout = async () => {
     try {
       await fetch(`${BASE_URL}/logout`, { method: 'POST', ...FETCH_OPTS });
@@ -115,7 +146,7 @@ export default function Home() {
 
     const userMessageCount = messages.filter(m => m.role === 'user').length;
     if (userMessageCount >= 10) {
-      showError('Thread logic limit reached (10 replies max)');
+      showError('Thread reply limit reached (10 replies max)');
       return;
     }
 
@@ -138,12 +169,57 @@ export default function Home() {
         const data = await res.json();
         setMessages(prev => [...prev, { id: data.message_id, role: 'assistant', content: data.reply }]);
         
-        if (userMessageCount === 0) {
-            loadThreads();
+        if (userMessageCount === 0 && data.thread_title) {
+          setThreads(prev => prev.map(t => t.id === activeThreadId ? { ...t, title: data.thread_title } : t));
         }
       } else {
         const err = await res.json();
         showError(err.detail || 'Failed to send message');
+        setMessages(prev => prev.filter(m => m.id !== tempId));
+      }
+    } catch {
+      showError('Network error');
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const generateImage = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!inputText.trim() || !activeThreadId) return;
+
+    const userMessageCount = messages.filter(m => m.role === 'user').length;
+    if (userMessageCount >= 10) {
+      showError('Thread reply limit reached (10 replies max)');
+      return;
+    }
+
+    const payload = inputText;
+    setInputText('');
+
+    const tempId = Date.now();
+    setMessages(prev => [...prev, { id: tempId, role: 'user', content: `🎨 ${payload}` }]);
+    setIsLoading(true);
+
+    try {
+      const res = await fetch(`${BASE_URL}/threads/${activeThreadId}/generate-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: payload }),
+        ...FETCH_OPTS,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(prev => [...prev, { id: data.message_id, role: 'assistant', content: `![Generated image](${data.image_url})` }]);
+
+        if (userMessageCount === 0 && data.thread_title) {
+          setThreads(prev => prev.map(t => t.id === activeThreadId ? { ...t, title: data.thread_title } : t));
+        }
+      } else {
+        const err = await res.json();
+        showError(err.detail || 'Failed to generate image');
         setMessages(prev => prev.filter(m => m.id !== tempId));
       }
     } catch {
@@ -159,7 +235,7 @@ export default function Home() {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      isImageMode ? generateImage() : sendMessage();
     }
   };
 
@@ -171,7 +247,8 @@ export default function Home() {
         threads={threads} 
         activeThreadId={activeThreadId} 
         onSelectThread={setActiveThreadId} 
-        onCreateThread={createNewThread} 
+        onCreateThread={createNewThread}
+        onDeleteThread={deleteThread}
         onLogout={handleLogout} 
       />
 
@@ -200,26 +277,42 @@ export default function Home() {
         />
 
         <div className="input-area">
-          <form className="input-form" onSubmit={sendMessage}>
+          <form className="input-form" onSubmit={isImageMode ? generateImage : sendMessage}>
             <textarea
+              ref={textareaRef}
               className="chat-input"
-              placeholder={activeThreadId ? "Message Nyx..." : "Create a thread first..."}
+              placeholder={
+                !activeThreadId ? "Create a thread first..." :
+                isImageMode ? "Describe an image to generate..." :
+                "Message Nyx..."
+              }
               value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
+              onChange={(e) => { setInputText(e.target.value); autoResizeTextarea(); }}
               onKeyDown={handleKeyDown}
               disabled={!activeThreadId || isLoading}
               rows={1}
             />
-            <button 
-              type="submit" 
-              className="send-btn" 
-              disabled={!inputText.trim() || !activeThreadId || isLoading}
-            >
-              <Send size={16} />
-            </button>
+            <div className="input-actions">
+              <button
+                type="button"
+                className={`image-mode-btn${isImageMode ? ' active' : ''}`}
+                onClick={() => setIsImageMode(prev => !prev)}
+                title={isImageMode ? "Switch to chat mode" : "Switch to image generation mode"}
+                disabled={!activeThreadId || isLoading}
+              >
+                <ImageIcon size={16} />
+              </button>
+              <button 
+                type="submit" 
+                className="send-btn" 
+                disabled={!inputText.trim() || !activeThreadId || isLoading}
+              >
+                <Send size={16} />
+              </button>
+            </div>
           </form>
           <div style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
-            Nyx uses GPT-5 Nano. Threads are strictly limited to 10 replies.
+            {isImageMode ? 'Image generation powered by DALL-E 3.' : 'Nyx uses GPT-5 Nano. Threads are strictly limited to 10 replies.'}
           </div>
         </div>
       </main>

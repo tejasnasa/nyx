@@ -1,4 +1,5 @@
-import { Bot, MessageSquarePlus, LogOut } from 'lucide-react';
+import { useState } from 'react';
+import { Bot, MessageSquarePlus, LogOut, Trash2 } from 'lucide-react';
 import { User, Thread } from '@/lib/api';
 
 type SidebarProps = {
@@ -7,10 +8,13 @@ type SidebarProps = {
   activeThreadId: number | null;
   onSelectThread: (id: number) => void;
   onCreateThread: () => void;
+  onDeleteThread: (id: number) => void;
   onLogout: () => void;
 };
 
-export default function Sidebar({ user, threads, activeThreadId, onSelectThread, onCreateThread, onLogout }: SidebarProps) {
+export default function Sidebar({ user, threads, activeThreadId, onSelectThread, onCreateThread, onDeleteThread, onLogout }: SidebarProps) {
+  const [hoveredThreadId, setHoveredThreadId] = useState<number | null>(null);
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -31,8 +35,21 @@ export default function Sidebar({ user, threads, activeThreadId, onSelectThread,
             key={thread.id} 
             className={`thread-item ${activeThreadId === thread.id ? 'active' : ''}`}
             onClick={() => onSelectThread(thread.id)}
+            onMouseEnter={() => setHoveredThreadId(thread.id)}
+            onMouseLeave={() => setHoveredThreadId(null)}
           >
-            {thread.title}
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {thread.title}
+            </span>
+            {hoveredThreadId === thread.id && (
+              <button
+                className="delete-thread-btn"
+                onClick={(e) => { e.stopPropagation(); onDeleteThread(thread.id); }}
+                title="Delete thread"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
           </div>
         ))}
       </div>
